@@ -18,6 +18,10 @@ if sys.version_info[0] < 3:
     range = xrange
     from itertools import izip as zip
 
+    
+"""
+__all__是一个字符串list，用来定义模块中对于from XXX import *时要对外导出的符号，即要暴露的接口，但它只对import *起作用，对from XXX import XXX不起作用。
+"""
 __all__ = ['libsvm', 'svm_problem', 'svm_parameter',
            'toPyModel', 'gen_svm_nodearray', 'print_null', 'svm_node', 'C_SVC',
            'EPSILON_SVR', 'LINEAR', 'NU_SVC', 'NU_SVR', 'ONE_CLASS',

@@ -11,6 +11,8 @@
 int libsvm_version = LIBSVM_VERSION;
 typedef float Qfloat;
 typedef signed char schar;
+
+// 实现了任意类型的min和max函数，交换函数，复制函数
 #ifndef min
 template <class T> static inline T min(T x,T y) { return (x<y)?x:y; }
 #endif
@@ -23,6 +25,7 @@ template <class S, class T> static inline void clone(T*& dst, S* src, int n)
 	dst = new T[n];
 	memcpy((void *)dst,(void *)src,sizeof(T)*n);
 }
+// 实现了幂次函数，这里使用了快速幂
 static inline double powi(double base, int times)
 {
 	double tmp = base, ret = 1.0;
@@ -34,16 +37,33 @@ static inline double powi(double base, int times)
 	}
 	return ret;
 }
+// 定义了无穷大为一个很大的有限数
+// 定义TAU为一个很小的浮点数
+// 实现了内存申请函数Malloc，暂时不知道为什么这里要使用Malloc而不是new
 #define INF HUGE_VAL
 #define TAU 1e-12
 #define Malloc(type,n) (type *)malloc((n)*sizeof(type))
-
+// 字符串输出函数
 static void print_string_stdout(const char *s)
 {
 	fputs(s,stdout);
 	fflush(stdout);
 }
+// 对字符串输出函数再次套壳
 static void (*svm_print_string) (const char *) = &print_string_stdout;
+
+
+// VA_LIST 是在C语言中解决变参问题的一组宏，所在头文件：#include <stdarg.h>，用于获取不确定个数的参数
+// va_start(va_list, arg)，va_start初始化va_list变量，使得va_list变量指向可变参数列表第一个参数的地址，第二个参数固定为可变参数列表(…)左边第一个参数。它的定义为：
+// #define _INTSIZEOF(n)   ( (sizeof(n) + sizeof(int) - 1) & ~(sizeof(int) - 1) )
+// #define va_start(ap,v)  ( ap = (va_list)_ADDRESSOF(v) + _INTSIZEOF(v) )
+// va_arg(va_list, t)，va_arg获取当前参数并使得va_list变量指向下一个参数的地址，第二个参数是获取参数的类型。它的定义为
+// #define va_arg(ap,t)    ( *(t *)((ap += _INTSIZEOF(t)) - _INTSIZEOF(t)) )
+// va_end(va_list)，va_end结束可变参数列表获取，将va_list变量置NULL。它的定义为：
+// #define va_end(ap)      ( ap = (va_list)0 )
+// 注：如果需要打印可变参数，可以使用vsprintf配合格式化字符串进行打印。
+
+// 这里将可变参数的信息输入到buf中，然后统一使用套壳的svm_print_string输出到std当中
 #if 1
 static void info(const char *fmt,...)
 {
@@ -184,6 +204,9 @@ void Cache::swap_index(int i, int j)
 	}
 }
 
+// 下面实现了核技巧
+// x[]在这里是所有的node的数组
+//
 //
 // Kernel evaluation
 //
@@ -384,6 +407,12 @@ double Kernel::k_function(const svm_node *x, const svm_node *y,
 //
 // Given:
 //
+// Q为核矩阵，y是坐标数组，Cp和Cn分别是正常数（positive）和负常数（negative）
+// p不知道是什么用
+// min 0.5(\alpha^T Q \alpha) + p^T \alpha
+// 前面一半是拉格朗日的乘子alpha_i alpha_j y_i y_j x_i^T x_j两两数据点相乘之后求和
+// 后面一半是alpha的求和
+//
 //	Q, p, y, Cp, Cn, and an initial feasible point \alpha
 //	l is the size of vectors and matrices
 //	eps is the stopping tolerance
@@ -422,11 +451,12 @@ protected:
 	double *G_bar;		// gradient, if we treat free variables as 0
 	int l;
 	bool unshrink;	// XXX
-
+	// 获取第i个测试点的常数C
 	double get_C(int i)
 	{
 		return (y[i] > 0)? Cp : Cn;
 	}
+	// 更新alpha的状态，alpha的状态有三个，分别是上限下限和自由
 	void update_alpha_status(int i)
 	{
 		if(alpha[i] >= get_C(i))
@@ -435,9 +465,11 @@ protected:
 			alpha_status[i] = LOWER_BOUND;
 		else alpha_status[i] = FREE;
 	}
+	// 判断函数，返回某一个alpha的状态
 	bool is_upper_bound(int i) { return alpha_status[i] == UPPER_BOUND; }
 	bool is_lower_bound(int i) { return alpha_status[i] == LOWER_BOUND; }
 	bool is_free(int i) { return alpha_status[i] == FREE; }
+	// 交换下标
 	void swap_index(int i, int j);
 	void reconstruct_gradient();
 	virtual int select_working_set(int &i, int &j);
@@ -459,6 +491,7 @@ void Solver::swap_index(int i, int j)
 	swap(G_bar[i],G_bar[j]);
 }
 
+// 重新计算导数，这里似乎有进行一系列压缩，可能在迭代中放弃掉了一些数据点以提升效率
 void Solver::reconstruct_gradient()
 {
 	// reconstruct inactive elements of G from G_bar and free variables
@@ -532,6 +565,9 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 	}
 
 	// initialize gradient
+	// 把下标为i的梯度设置为p_i,把G_bar_i设置为0
+	// 计算梯度，这里似乎是直接进行了求导（数学上个给出了求导公式然后直接带入）
+	// 
 	{
 		G = new double[l];
 		G_bar = new double[l];
@@ -556,7 +592,7 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 	}
 
 	// optimization step
-
+	// 优化和逼近
 	int iter = 0;
 	int max_iter = max(10000000, l>INT_MAX/100 ? INT_MAX : 100*l);
 	int counter = min(l,1000)+1;
@@ -599,11 +635,14 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 		double old_alpha_i = alpha[i];
 		double old_alpha_j = alpha[j];
 
+		// 检查选取的两个样本是否在同侧
 		if(y[i]!=y[j])
 		{
+			// QD[i] = \kappa(i,i) , Q_i[j] = \kappa(i,j)
 			double quad_coef = QD[i]+QD[j]+2*Q_i[j];
 			if (quad_coef <= 0)
 				quad_coef = TAU;
+			// G[i]为目标函数对\alpha_i的偏导
 			double delta = (-G[i]-G[j])/quad_coef;
 			double diff = alpha[i] - alpha[j];
 			alpha[i] += delta;
@@ -697,7 +736,6 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 		}
 
 		// update alpha_status and G_bar
-
 		{
 			bool ui = is_upper_bound(i);
 			bool uj = is_upper_bound(j);
